@@ -314,3 +314,70 @@ def two_path_inception_v3(
     max_mix_idx=max_mix_idx,
     max_mix_deep_two_paths_idx=max_mix_deep_two_paths_idx,
     model_name=model_name)
+
+
+
+#########################################
+from tensorflow.keras.layers import Input, GlobalAveragePooling2D, Dense, Dropout, Concatenate, Add
+from tensorflow.keras.models import Model
+from cai.layers import cbam_block
+
+def compiled_rgb_lab_cbam_model(
+    input_shape=(224, 224, 3),
+    classes=10,
+    dropout_rate=0.5,
+    base_trainable=False,
+    fusion_type='concat',
+    model_name='rgb_lab_cbam_v1'
+):
+    # Inputs for LAB and RGB
+    lab_input = Input(shape=input_shape, name='lab_input')
+    rgb_input = Input(shape=input_shape, name='rgb_input')
+
+    # Two identical Two-Path Inception V3 branches
+    lab_branch = compiled_two_path_inception_v3(
+        input_shape=input_shape,
+        classes=classes,
+        model_name='lab_branch',
+        two_paths_first_block=True,
+        deep_two_paths=True,
+        deep_two_paths_compression=0.6
+    )
+
+    rgb_branch = compiled_two_path_inception_v3(
+        input_shape=input_shape,
+        classes=classes,
+        model_name='rgb_branch',
+        two_paths_first_block=True,
+        deep_two_paths=True,
+        deep_two_paths_compression=0.6
+    )
+
+    # Make them non-trainable if specified
+    lab_branch.trainable = base_trainable
+    rgb_branch.trainable = base_trainable
+
+    lab_feat = lab_branch(lab_input)
+    rgb_feat = rgb_branch(rgb_input)
+
+    # Feature fusion
+    if fusion_type == 'concat':
+        combined = Concatenate()([lab_feat, rgb_feat])
+    elif fusion_type == 'add':
+        combined = Add()([lab_feat, rgb_feat])
+    else:
+        raise ValueError("fusion_type must be 'concat' or 'add'")
+
+    # CBAM attention block
+    attention = cbam_block(combined)
+
+    # Classification head
+    x = GlobalAveragePooling2D()(attention)
+    x = Dense(128, activation='relu')(x)
+    x = Dropout(dropout_rate)(x)
+    output = Dense(classes, activation='softmax', name='final_softmax')(x)
+
+    model = Model(inputs=[lab_input, rgb_input], outputs=output, name=model_name)
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+
+    return model

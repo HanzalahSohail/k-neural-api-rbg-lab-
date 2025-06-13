@@ -796,3 +796,35 @@ def GetClasses():
         'hard_sigmoid': HardSigmoid,
         'hard_swish': HardSwish
     }
+
+########################################################################
+import tensorflow as tf
+from tensorflow.keras import layers
+
+def cbam_block(input_feature, reduction_ratio=8, name_prefix='cbam'):
+    """CBAM: Convolutional Block Attention Module"""
+    channel = input_feature.shape[-1]
+
+    # ----- Channel Attention -----
+    avg_pool = layers.GlobalAveragePooling2D()(input_feature)
+    max_pool = layers.GlobalMaxPooling2D()(input_feature)
+
+    shared_dense = tf.keras.Sequential([
+        layers.Dense(channel // reduction_ratio, activation='relu'),
+        layers.Dense(channel)
+    ])
+
+    avg_out = shared_dense(avg_pool)
+    max_out = shared_dense(max_pool)
+    channel_attention = layers.Activation('sigmoid')(avg_out + max_out)
+    channel_attention = layers.Reshape((1, 1, channel))(channel_attention)
+    channel_refined = layers.Multiply()([input_feature, channel_attention])
+
+    # ----- Spatial Attention -----
+    avg_pool_spatial = tf.reduce_mean(channel_refined, axis=-1, keepdims=True)
+    max_pool_spatial = tf.reduce_max(channel_refined, axis=-1, keepdims=True)
+    spatial = tf.concat([avg_pool_spatial, max_pool_spatial], axis=-1)
+    spatial_attention = layers.Conv2D(1, kernel_size=7, padding='same', activation='sigmoid')(spatial)
+
+    refined_feature = layers.Multiply()([channel_refined, spatial_attention])
+    return refined_feature

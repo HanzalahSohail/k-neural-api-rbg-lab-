@@ -1236,3 +1236,122 @@ def extract_subset_every(source_folder, dest_folder, move_every=10, shift=0, ver
                 moved_cnt += 1
             file_pos += move_every
         if verbose: print(str(moved_cnt)+" files have been moved from "+class_folder+" to "+dest_class_folder+".")
+
+
+
+#################################################
+import cv2
+import numpy as np
+import os
+from sklearn.model_selection import train_test_split
+from tensorflow.keras.utils import to_categorical
+
+def load_rgb_lab_images_from_folders(seed=None, root_dir=None,
+    verbose=True, bipolar=False,
+    training_size=0.6, validation_size=0.2, test_size=0.2,
+    target_size=(224,224), smart_resize=False):
+  
+  if root_dir is None:
+    print("No root dir at load_rgb_lab_images_from_folders")
+    return
+
+  if seed is not None:
+    random.seed(seed)
+  
+  classes = sorted(os.listdir(root_dir))
+  classes_num = len(classes)
+  if verbose:
+    print("Loading", classes_num, "classes.")
+
+  train_path, val_path, test_path = [], [], []
+  train_y, val_y, test_y = [], [], []
+
+  for i, _class in enumerate(classes):
+    paths = glob.glob(os.path.join(root_dir, _class, "*"))
+    paths = [p for p in paths if p.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp'))]
+    random.shuffle(paths)
+    cat_total = len(paths)
+
+    train_path += paths[:int(cat_total * training_size)]
+    train_y += [i] * int(cat_total * training_size)
+
+    val_path += paths[int(cat_total * training_size):int(cat_total * (training_size + validation_size))]
+    val_y += [i] * len(paths[int(cat_total * training_size):int(cat_total * (training_size + validation_size))])
+
+    test_path += paths[int(cat_total * (training_size + validation_size)):]
+    test_y += [i] * len(paths[int(cat_total * (training_size + validation_size)):])
+
+  def load_rgb_lab_batch(image_paths):
+    rgb_images = []
+    lab_images = []
+
+    for path in image_paths:
+      img = cv2.imread(path)
+      if img is None:
+        continue
+      if smart_resize:
+        img = tf.image.resize_with_pad(img, target_size[0], target_size[1]).numpy().astype(np.uint8)
+      else:
+        img = cv2.resize(img, target_size)
+
+      rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32)
+      lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB).astype(np.float32)
+
+      # Normalize both
+      if bipolar:
+        rgb = (rgb / 127.5) - 1.0  # [-1, 1]
+        lab[..., 0] = (lab[..., 0] / 50.0) - 1.0  # L in [-1, 1]
+        lab[..., 1:] = lab[..., 1:] / 128.0  # A/B in ~[-1, 1]
+      else:
+        rgb = rgb / 255.0
+        lab[..., 0] = lab[..., 0] / 100.0
+        lab[..., 1:] = (lab[..., 1:] + 128.0) / 255.0
+
+      rgb_images.append(rgb)
+      lab_images.append(lab)
+
+    return np.array(rgb_images, dtype='float32'), np.array(lab_images, dtype='float32')
+
+  if verbose:
+    print("Loading train images")
+  rgb_train, lab_train = load_rgb_lab_batch(train_path)
+  if verbose:
+    print("Train shape:", rgb_train.shape)
+
+  if verbose:
+    print("Loading validation images")
+  rgb_val, lab_val = load_rgb_lab_batch(val_path)
+  if verbose:
+    print("Validation shape:", rgb_val.shape)
+
+  if verbose:
+    print("Loading test images")
+  rgb_test, lab_test = load_rgb_lab_batch(test_path)
+  if verbose:
+    print("Test shape:", rgb_test.shape)
+
+  train_y = np.array(train_y)
+  val_y = np.array(val_y)
+  test_y = np.array(test_y)
+
+  if verbose:
+    for channel in range(rgb_train.shape[3]):
+      print(f"RGB Channel {channel} min: {np.min(rgb_train[:,:,:,channel])}, max: {np.max(rgb_train[:,:,:,channel])}")
+    for channel in range(lab_train.shape[3]):
+      print(f"LAB Channel {channel} min: {np.min(lab_train[:,:,:,channel])}, max: {np.max(lab_train[:,:,:,channel])}")
+
+  # Class weights
+  class_weight = sklearn.utils.class_weight.compute_class_weight(
+    class_weight='balanced',
+    classes=np.unique(train_y),
+    y=train_y
+  )
+  class_weight = {i: class_weight[i] for i in range(classes_num)}
+
+  # One-hot encoding
+  train_y = keras.utils.to_categorical(train_y, classes_num)
+  val_y = keras.utils.to_categorical(val_y, classes_num)
+  test_y = keras.utils.to_categorical(test_y, classes_num)
+
+  print("Loaded.")
+  return rgb_train, lab_train, rgb_val, lab_val, rgb_test, lab_test, train_y, val_y, test_y, class_weight, classes
