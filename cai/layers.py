@@ -800,31 +800,39 @@ def GetClasses():
 ########################################################################
 import tensorflow as tf
 from tensorflow.keras import layers
+from tensorflow.keras.layers import Lambda, Concatenate
 
 def cbam_block(input_feature, reduction_ratio=8, name_prefix='cbam'):
-    """CBAM: Convolutional Block Attention Module"""
+    """CBAM: Convolutional Block Attention Module with proper Keras layers."""
     channel = input_feature.shape[-1]
 
     # ----- Channel Attention -----
-    avg_pool = layers.GlobalAveragePooling2D()(input_feature)
-    max_pool = layers.GlobalMaxPooling2D()(input_feature)
+    avg_pool = layers.GlobalAveragePooling2D(name=f'{name_prefix}_ch_avgpool')(input_feature)
+    max_pool = layers.GlobalMaxPooling2D(name=f'{name_prefix}_ch_maxpool')(input_feature)
 
     shared_dense = tf.keras.Sequential([
-        layers.Dense(channel // reduction_ratio, activation='relu'),
-        layers.Dense(channel)
-    ])
+        layers.Dense(channel // reduction_ratio, activation='relu', name=f'{name_prefix}_ch_dense1'),
+        layers.Dense(channel,              name=f'{name_prefix}_ch_dense2')
+    ], name=f'{name_prefix}_ch_shared_mlp')
 
     avg_out = shared_dense(avg_pool)
     max_out = shared_dense(max_pool)
-    channel_attention = layers.Activation('sigmoid')(avg_out + max_out)
-    channel_attention = layers.Reshape((1, 1, channel))(channel_attention)
-    channel_refined = layers.Multiply()([input_feature, channel_attention])
+    channel_attention = layers.Activation('sigmoid', name=f'{name_prefix}_ch_sigmoid')(avg_out + max_out)
+    channel_attention = layers.Reshape((1, 1, channel), name=f'{name_prefix}_ch_reshape')(channel_attention)
+    channel_refined = layers.Multiply(name=f'{name_prefix}_ch_mul')([input_feature, channel_attention])
 
     # ----- Spatial Attention -----
-    avg_pool_spatial = tf.reduce_mean(channel_refined, axis=-1, keepdims=True)
-    max_pool_spatial = tf.reduce_max(channel_refined, axis=-1, keepdims=True)
-    spatial = tf.concat([avg_pool_spatial, max_pool_spatial], axis=-1)
-    spatial_attention = layers.Conv2D(1, kernel_size=7, padding='same', activation='sigmoid')(spatial)
+    # compute mean & max across channels via Lambda layers
+    avg_pool_spatial = Lambda(lambda x: tf.reduce_mean(x, axis=-1, keepdims=True),
+                              name=f'{name_prefix}_sp_avgpool')(channel_refined)
+    max_pool_spatial = Lambda(lambda x: tf.reduce_max(x, axis=-1, keepdims=True),
+                              name=f'{name_prefix}_sp_maxpool')(channel_refined)
+    spatial = Concatenate(axis=-1, name=f'{name_prefix}_sp_concat')([avg_pool_spatial, max_pool_spatial])
+    spatial_attention = layers.Conv2D(1,
+                                      kernel_size=7,
+                                      padding='same',
+                                      activation='sigmoid',
+                                      name=f'{name_prefix}_sp_conv')(spatial)
 
-    refined_feature = layers.Multiply()([channel_refined, spatial_attention])
+    refined_feature = layers.Multiply(name=f'{name_prefix}_sp_mul')([channel_refined, spatial_attention])
     return refined_feature
