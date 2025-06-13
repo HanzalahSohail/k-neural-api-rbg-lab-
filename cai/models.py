@@ -321,6 +321,7 @@ def two_path_inception_v3(
 from tensorflow.keras.layers import Input, GlobalAveragePooling2D, Dense, Dropout, Concatenate, Add
 from tensorflow.keras.models import Model
 from cai.layers import cbam_block
+from cai.models import two_path_inception_v3  # make sure this is correctly imported
 
 def compiled_rgb_lab_cbam_model(
     input_shape=(224, 224, 3),
@@ -334,8 +335,9 @@ def compiled_rgb_lab_cbam_model(
     lab_input = Input(shape=input_shape, name='lab_input')
     rgb_input = Input(shape=input_shape, name='rgb_input')
 
-    # Two identical Two-Path Inception V3 branches
-    lab_branch = compiled_two_path_inception_v3(
+    # Use two_path_inception_v3 with include_top=False to get 4D features
+    lab_branch = two_path_inception_v3(
+        include_top=False,
         input_shape=input_shape,
         classes=classes,
         model_name='lab_branch',
@@ -344,7 +346,8 @@ def compiled_rgb_lab_cbam_model(
         deep_two_paths_compression=0.6
     )
 
-    rgb_branch = compiled_two_path_inception_v3(
+    rgb_branch = two_path_inception_v3(
+        include_top=False,
         input_shape=input_shape,
         classes=classes,
         model_name='rgb_branch',
@@ -353,22 +356,28 @@ def compiled_rgb_lab_cbam_model(
         deep_two_paths_compression=0.6
     )
 
-    # Make them non-trainable if specified
+    # Make branches trainable or not
     lab_branch.trainable = base_trainable
     rgb_branch.trainable = base_trainable
 
-    lab_feat = lab_branch(lab_input)
-    rgb_feat = rgb_branch(rgb_input)
+    # Extract 4D features
+    lab_feat = lab_branch(lab_input)  # shape: (None, H, W, C)
+    rgb_feat = rgb_branch(rgb_input)  # shape: (None, H, W, C)
+
+
+    # ← insert the debug prints here:
+    print("→ lab_feat ndim:", lab_feat.ndim, " shape:", lab_feat.shape)
+    print("→ rgb_feat ndim:", rgb_feat.ndim, " shape:", rgb_feat.shape)
 
     # Feature fusion
     if fusion_type == 'concat':
-        combined = Concatenate()([lab_feat, rgb_feat])
+        combined = Concatenate(axis=-1)([lab_feat, rgb_feat])
     elif fusion_type == 'add':
         combined = Add()([lab_feat, rgb_feat])
     else:
         raise ValueError("fusion_type must be 'concat' or 'add'")
 
-    # CBAM attention block
+    # CBAM attention block (on 4D feature map)
     attention = cbam_block(combined)
 
     # Classification head
@@ -377,7 +386,9 @@ def compiled_rgb_lab_cbam_model(
     x = Dropout(dropout_rate)(x)
     output = Dense(classes, activation='softmax', name='final_softmax')(x)
 
+    # Final model
     model = Model(inputs=[lab_input, rgb_input], outputs=output, name=model_name)
     model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
 
     return model
+
