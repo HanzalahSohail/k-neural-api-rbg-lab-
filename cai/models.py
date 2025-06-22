@@ -327,7 +327,7 @@ def compiled_rgb_lab_cbam_model(
     input_shape=(224, 224, 3),
     classes=10,
     dropout_rate=0.5,
-    base_trainable=False,
+    base_trainable=True,
     fusion_type='concat',
     model_name='rgb_lab_cbam_v1'
 ):
@@ -338,6 +338,7 @@ def compiled_rgb_lab_cbam_model(
     # Use two_path_inception_v3 with include_top=False to get 4D features
     lab_branch = two_path_inception_v3(
         include_top=False,
+        weights = 'imagenet',
         input_shape=input_shape,
         classes=classes,
         model_name='lab_branch',
@@ -348,6 +349,7 @@ def compiled_rgb_lab_cbam_model(
 
     rgb_branch = two_path_inception_v3(
         include_top=False,
+        weights='imagenet',
         input_shape=input_shape,
         classes=classes,
         model_name='rgb_branch',

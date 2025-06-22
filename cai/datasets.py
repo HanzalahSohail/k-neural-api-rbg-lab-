@@ -1304,8 +1304,10 @@ def load_rgb_lab_images_from_folders(seed=None, root_dir=None,
         lab[..., 1:] = lab[..., 1:] / 128.0  # A/B in ~[-1, 1]
       else:
         rgb = rgb / 255.0
+        # L channel (0–100) → [0,1]
         lab[..., 0] = lab[..., 0] / 100.0
-        lab[..., 1:] = (lab[..., 1:] + 128.0) / 255.0
+        # A/B channels (–128–127) → [–1,1]
+        lab[..., 1:] = (lab[..., 1:] - 128.0) / 127.0
 
       rgb_images.append(rgb)
       lab_images.append(lab)
