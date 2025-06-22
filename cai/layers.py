@@ -823,10 +823,21 @@ def cbam_block(input_feature, reduction_ratio=8, name_prefix='cbam'):
 
     # ----- Spatial Attention -----
     # compute mean & max across channels via Lambda layers
-    avg_pool_spatial = Lambda(lambda x: tf.reduce_mean(x, axis=-1, keepdims=True),
-                              name=f'{name_prefix}_sp_avgpool')(channel_refined)
-    max_pool_spatial = Lambda(lambda x: tf.reduce_max(x, axis=-1, keepdims=True),
-                              name=f'{name_prefix}_sp_maxpool')(channel_refined)
+    def _spatial_output_shape(input_shape):
+        # input_shape is a tuple (batch, H, W, C)
+        return (input_shape[0], input_shape[1], input_shape[2], 1)
+
+    avg_pool_spatial = Lambda(
+        lambda x: tf.reduce_mean(x, axis=-1, keepdims=True),
+        output_shape=_spatial_output_shape,
+        name=f'{name_prefix}_sp_avgpool'
+    )(channel_refined)
+
+    max_pool_spatial = Lambda(
+        lambda x: tf.reduce_max(x, axis=-1, keepdims=True),
+        output_shape=_spatial_output_shape,
+        name=f'{name_prefix}_sp_maxpool'
+    )(channel_refined)
     spatial = Concatenate(axis=-1, name=f'{name_prefix}_sp_concat')([avg_pool_spatial, max_pool_spatial])
     spatial_attention = layers.Conv2D(1,
                                       kernel_size=7,
