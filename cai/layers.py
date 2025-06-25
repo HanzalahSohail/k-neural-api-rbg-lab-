@@ -812,7 +812,7 @@ def cbam_block(input_feature, reduction_ratio=8, name_prefix='cbam'):
 
     shared_dense = tf.keras.Sequential([
         layers.Dense(channel // reduction_ratio, activation='relu', name=f'{name_prefix}_ch_dense1'),
-        layers.Dense(channel,              name=f'{name_prefix}_ch_dense2')
+        layers.Dense(channel, name=f'{name_prefix}_ch_dense2')
     ], name=f'{name_prefix}_ch_shared_mlp')
 
     avg_out = shared_dense(avg_pool)
@@ -822,22 +822,17 @@ def cbam_block(input_feature, reduction_ratio=8, name_prefix='cbam'):
     channel_refined = layers.Multiply(name=f'{name_prefix}_ch_mul')([input_feature, channel_attention])
 
     # ----- Spatial Attention -----
-    # compute mean & max across channels via Lambda layers
-    def _spatial_output_shape(input_shape):
-        # input_shape is a tuple (batch, H, W, C)
-        return (input_shape[0], input_shape[1], input_shape[2], 1)
-
+    # Remove output_shape parameter - Keras can infer it automatically
     avg_pool_spatial = Lambda(
         lambda x: tf.reduce_mean(x, axis=-1, keepdims=True),
-        output_shape=_spatial_output_shape,
         name=f'{name_prefix}_sp_avgpool'
     )(channel_refined)
 
     max_pool_spatial = Lambda(
         lambda x: tf.reduce_max(x, axis=-1, keepdims=True),
-        output_shape=_spatial_output_shape,
         name=f'{name_prefix}_sp_maxpool'
     )(channel_refined)
+    
     spatial = Concatenate(axis=-1, name=f'{name_prefix}_sp_concat')([avg_pool_spatial, max_pool_spatial])
     spatial_attention = layers.Conv2D(1,
                                       kernel_size=7,
